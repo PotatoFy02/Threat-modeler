@@ -9,6 +9,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             system_name TEXT NOT NULL,
             scanned_at TEXT NOT NULL,
             total_threats INTEGER,
@@ -33,7 +34,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_scan(system_name, threats):
+def save_scan(system_name, threats, user_id=None):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -41,9 +42,9 @@ def save_scan(system_name, threats):
     medium = sum(1 for t in threats if t.risk_level == "MEDIUM")
     low = sum(1 for t in threats if t.risk_level == "LOW")
     cursor.execute("""
-        INSERT INTO scans (system_name, scanned_at, total_threats, high_count, medium_count, low_count)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (system_name, now, len(threats), high, medium, low))
+        INSERT INTO scans (user_id, system_name, scanned_at, total_threats, high_count, medium_count, low_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, system_name, now, len(threats), high, medium, low))
     scan_id = cursor.lastrowid
     for t in threats:
         cursor.execute("""
@@ -54,10 +55,13 @@ def save_scan(system_name, threats):
     conn.close()
     return scan_id
 
-def get_all_scans():
+def get_all_scans(user_id=None):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM scans ORDER BY scanned_at DESC")
+    if user_id:
+        cursor.execute("SELECT * FROM scans WHERE user_id = ? ORDER BY scanned_at DESC", (user_id,))
+    else:
+        cursor.execute("SELECT * FROM scans ORDER BY scanned_at DESC")
     rows = cursor.fetchall()
     conn.close()
     return rows

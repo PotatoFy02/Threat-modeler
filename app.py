@@ -1,30 +1,49 @@
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template, send_file, session
 from models import Component
 from stride_engine import analyze
 from database import init_db, save_scan, get_all_scans, get_scan_threats
 from report_generator import generate_pdf_report
+from auth import auth, init_oauth, init_users_db
+import os
 
 app = Flask(__name__)
-init_db()
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID')
+app.config['GOOGLE_CLIENT_SECRET'] = os.environ.get('GOOGLE_CLIENT_SECRET')
 
-# ── ROUTE 1: Analyze a system ──────────────────────────────
+init_oauth(app)
+init_db()
+init_users_db()
+
+app.register_blueprint(auth)
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return jsonify({"error": "Login required"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route("/")
+def index():
+    return render_template("index.html", user=session.get('user_name'))
+
 @app.route("/analyze", methods=["POST"])
+@login_required
 def analyze_system():
     data = request.get_json()
-
     if not data or "system_name" not in data or "components" not in data:
-        return jsonify({"error": "Invalid input. Provide system_name and components."}), 400
-
+        return jsonify({"error": "Invalid input."}), 400
     system_name = data["system_name"]
     try:
         components = [Component(**c) for c in data["components"]]
     except Exception as e:
         return jsonify({"error": f"Component error: {str(e)}"}), 400
-
     threats = analyze(components)
-    scan_id = save_scan(system_name, threats)
+    scan_id = save_scan(system_name, threats, session['user_id'])
     generate_pdf_report(threats, system_name, f"report_{scan_id}.pdf")
-
     return jsonify({
         "scan_id": scan_id,
         "system_name": system_name,
@@ -44,10 +63,10 @@ def analyze_system():
         ]
     })
 
-# ── ROUTE 2: Get all past scans ────────────────────────────
 @app.route("/scans", methods=["GET"])
+@login_required
 def list_scans():
-    scans = get_all_scans()
+    scans = get_all_scans(session['user_id'])
     return jsonify([
         {
             "scan_id": row[0],
@@ -60,8 +79,8 @@ def list_scans():
         } for row in scans
     ])
 
-# ── ROUTE 3: Get threats for a specific scan ───────────────
 @app.route("/scans/<int:scan_id>", methods=["GET"])
+@login_required
 def get_scan(scan_id):
     threats = get_scan_threats(scan_id)
     if not threats:
@@ -78,18 +97,14 @@ def get_scan(scan_id):
             "mitigation": row[7]
         } for row in threats
     ])
-from flask import render_template, send_file
-
-@app.route("/")
-def index():
-    return render_template("index.html")
 
 @app.route("/report/<int:scan_id>")
+@login_required
 def download_report(scan_id):
-    import os
     path = os.path.join(os.getcwd(), f"report_{scan_id}.pdf")
     if os.path.exists(path):
         return send_file(path, as_attachment=True)
     return jsonify({"error": "Report not found"}), 404
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
