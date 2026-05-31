@@ -1,1 +1,1 @@
-#Note: To the future dev trying to take inspiration or copy the code just remember at first only I and GOD knows how it works and now after almost finishing the project now only god knows.Good luck with any changes.
+#Note: To the future dev trying to take inspiration or copy the code just remember at first only I and GOD knows how it worked and now after almost finishing the project now only god knows how it works.Good luck with any changes.
