@@ -1,10 +1,19 @@
-import sqlite3
+import psycopg2
 from datetime import datetime
 from flask import Blueprint, redirect, url_for, session
 from authlib.integrations.flask_client import OAuth
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 auth = Blueprint('auth', __name__)
 oauth = OAuth()
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
 
 def init_oauth(app):
     oauth.init_app(app)
@@ -17,35 +26,21 @@ def init_oauth(app):
     )
 
 def init_users_db():
-    conn = sqlite3.connect('threats.db')
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            google_id TEXT UNIQUE,
-            email TEXT UNIQUE,
-            name TEXT,
-            plan TEXT DEFAULT 'free',
-            created_at TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # Table already created in Supabase
+    pass
 
 def get_or_create_user(google_id, email, name):
-    conn = sqlite3.connect('threats.db')
+    conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE google_id = ?", (google_id,))
+    cursor.execute("SELECT * FROM users WHERE google_id = %s", (google_id,))
     user = cursor.fetchone()
     if not user:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("""
-            INSERT INTO users (google_id, email, name, plan, created_at)
-            VALUES (?, ?, ?, 'free', ?)
-        """, (google_id, email, name, now))
-        conn.commit()
-        cursor.execute("SELECT * FROM users WHERE google_id = ?", (google_id,))
+            INSERT INTO users (google_id, email, name, plan)
+            VALUES (%s, %s, %s, 'free') RETURNING *
+        """, (google_id, email, name))
         user = cursor.fetchone()
+        conn.commit()
     conn.close()
     return user
 
