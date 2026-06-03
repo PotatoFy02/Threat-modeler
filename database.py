@@ -23,7 +23,12 @@ def save_scan(system_name, threats, user_id=None):
         INSERT INTO scans (user_id, system_name, total_threats, high_count, medium_count, low_count)
         VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
     """, (user_id, system_name, len(threats), high, medium, low))
-    scan_id = cursor.fetchone()[0]
+    result = cursor.fetchone()
+    if result is None:
+        conn.rollback()
+        conn.close()
+        raise RuntimeError("Failed to retrieve scan id after insert")
+    scan_id = result[0]
     for t in threats:
         cursor.execute("""
             INSERT INTO threats (scan_id, stride_category, title, affected_component, description, risk_level, mitigation)
@@ -57,3 +62,21 @@ def get_scan_threats(scan_id):
     rows = cursor.fetchall()
     conn.close()
     return rows
+def get_or_create_user(google_id, email, name):
+    conn = get_conn()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id, google_id, email, name FROM users WHERE google_id = %s", (google_id,))
+    user = cursor.fetchone()
+    
+    if user is None:
+        cursor.execute("""
+            INSERT INTO users (google_id, email, name)
+            VALUES (%s, %s, %s)
+            RETURNING id, google_id, email, name
+        """, (google_id, email, name))
+        user = cursor.fetchone()
+        conn.commit()
+    
+    conn.close()
+    return user  

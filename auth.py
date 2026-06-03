@@ -1,7 +1,11 @@
 import psycopg2
+from datetime import datetime
 from flask import Blueprint, redirect, url_for, session
 from authlib.integrations.flask_client import OAuth
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 auth = Blueprint('auth', __name__)
 oauth = OAuth()
@@ -41,7 +45,7 @@ def get_or_create_user(google_id, email, name):
 
 @auth.route('/login')
 def login():
-    redirect_uri = url_for('auth.callback', _external=True)
+    redirect_uri = 'http://localhost:5000/callback'
     return oauth.google.authorize_redirect(redirect_uri)
 
 @auth.route('/callback')
@@ -53,9 +57,9 @@ def callback():
         email=userinfo['email'],
         name=userinfo.get('name', '')
     )
-    session['user_id'] = user[0]
-    session['user_name'] = user[3]
-    session['user_email'] = user[2]
+    session['user_id'] = user[0] # pyright: ignore[reportOptionalSubscript]
+    session['user_name'] = user[3] # type: ignore
+    session['user_email'] = user[2] # type: ignore
     return redirect('/')
 
 @auth.route('/logout')
