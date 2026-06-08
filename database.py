@@ -21,7 +21,6 @@ def put_conn(conn):
 
 
 def init_db():
-    """Create all tables if they don't exist. Reproducible schema."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -60,7 +59,6 @@ def init_db():
                     cve_reference      TEXT DEFAULT ''
                 );
             """)
-            
             cur.execute("CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_threats_scan_id ON threats(scan_id);")
         conn.commit()
@@ -122,7 +120,6 @@ def get_all_scans(user_id):
 
 
 def get_scan_threats(scan_id, user_id):
-    """Only returns threats from a scan the user OWNS (fixes IDOR)."""
     if user_id is None:
         raise ValueError("user_id is required")
     conn = get_conn()
