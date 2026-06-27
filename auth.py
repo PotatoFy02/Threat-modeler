@@ -1,68 +1,89 @@
-import psycopg2
-from datetime import datetime
+import os
 from flask import Blueprint, redirect, url_for, session
 from authlib.integrations.flask_client import OAuth
-import os
 from dotenv import load_dotenv
+from database import get_conn, put_conn   # reuse pool, no duplicate connection logic
 
 load_dotenv()
 
-auth = Blueprint('auth', __name__)
+auth = Blueprint("auth", __name__)
 oauth = OAuth()
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
-
-def get_conn():
-    return psycopg2.connect(DATABASE_URL)
 
 def init_oauth(app):
     oauth.init_app(app)
     oauth.register(
-        name='google',
-        client_id=app.config['GOOGLE_CLIENT_ID'],
-        client_secret=app.config['GOOGLE_CLIENT_SECRET'],
-        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-        client_kwargs={'scope': 'openid email profile'}
+        name="google",
+        client_id=app.config["GOOGLE_CLIENT_ID"],
+        client_secret=app.config["GOOGLE_CLIENT_SECRET"],
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
     )
 
+
 def init_users_db():
+    # Schema now lives in database.init_db(); kept for backwards-compat.
     pass
+
 
 def get_or_create_user(google_id, email, name):
     conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE google_id = %s", (google_id,))
-    user = cursor.fetchone()
-    if not user:
-        cursor.execute("""
-            INSERT INTO users (google_id, email, name, plan)
-            VALUES (%s, %s, %s, 'free') RETURNING *
-        """, (google_id, email, name))
-        user = cursor.fetchone()
-        conn.commit()
-    conn.close()
-    return user
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, email, name FROM users WHERE google_id = %s",
+                (google_id,),
+            )
+            user = cur.fetchone()
+            if not user:
+                cur.execute("""
+                    INSERT INTO users (google_id, email, name, plan)
+                    VALUES (%s, %s, %s, 'free')
+                    RETURNING id, email, name
+                """, (google_id, email, name))
+                user = cur.fetchone()
+                conn.commit()
+        return user  # (id, email, name) — fixed, named order
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
 
-@auth.route('/login')
+
+@auth.route("/login")
 def login():
-    redirect_uri = 'http://localhost:5000/callback'
+    # Dynamic redirect — works locally AND in production
+    redirect_uri = url_for("auth.callback", _external=True)
     return oauth.google.authorize_redirect(redirect_uri)
 
-@auth.route('/callback')
-def callback():
-    token = oauth.google.authorize_access_token()
-    userinfo = token['userinfo']
-    user = get_or_create_user(
-        google_id=userinfo['sub'],
-        email=userinfo['email'],
-        name=userinfo.get('name', '')
-    )
-    session['user_id'] = user[0] # pyright: ignore[reportOptionalSubscript]
-    session['user_name'] = user[3] # type: ignore
-    session['user_email'] = user[2] # type: ignore
-    return redirect('/')
 
-@auth.route('/logout')
+@auth.route("/callback")
+def callback():
+    try:
+        token = oauth.google.authorize_access_token()
+        userinfo = token.get("userinfo")
+        if not userinfo or "sub" not in userinfo or "email" not in userinfo:
+            return redirect("/?error=auth_failed")
+    except Exception:
+        return redirect("/?error=auth_failed")
+
+    user = get_or_create_user(
+        google_id=userinfo["sub"],
+        email=userinfo["email"],
+        name=userinfo.get("name", ""),
+    )
+    if not user:
+        return redirect("/?error=auth_failed")
+
+    session.clear()                 # prevent session fixation
+    session["user_id"] = user[0]
+    session["user_email"] = user[1]
+    session["user_name"] = user[2]
+    return redirect("/")
+
+
+@auth.route("/logout")
 def logout():
     session.clear()
-    return redirect('/')
+    return redirect("/")
